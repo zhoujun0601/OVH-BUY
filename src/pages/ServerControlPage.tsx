@@ -1796,7 +1796,22 @@ const ServerControlPage: React.FC = () => {
       console.error('❌ 打开IPMI控制台失败:', error);
       console.error('错误详情:', error.response?.data);
       setIpmiLoading(false);
-      showToast({ type: 'error', title: '打开IPMI控制台失败' });
+      
+      // 检查是否是不支持IPMI的错误
+      const errorMessage = error.response?.data?.error || error.message || '';
+      if (errorMessage.includes('does not exist') || errorMessage.includes('ipmi')) {
+        showToast({ 
+          type: 'warning', 
+          title: '此服务器不支持IPMI功能',
+          message: '该服务器型号可能不包含IPMI/KVM远程控制台功能'
+        });
+      } else {
+        showToast({ 
+          type: 'error', 
+          title: '打开IPMI控制台失败',
+          message: errorMessage.substring(0, 100)
+        });
+      }
     }
   };
 
@@ -2884,7 +2899,7 @@ const ServerControlPage: React.FC = () => {
                 </div>
                 <button
                   onClick={() => setShowReinstallDialog(false)}
-                  className="text-cyber-muted hover:text-cyber-text transition-colors">
+                  className="p-2 hover:bg-cyber-grid/50 rounded-lg transition-colors text-cyber-muted hover:text-cyber-text">
                   <X className="w-5 h-5" />
                 </button>
               </div>
@@ -3617,8 +3632,8 @@ const ServerControlPage: React.FC = () => {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="cyber-card max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-4">
+                className="cyber-card max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <div className="flex items-center justify-between mb-4 flex-shrink-0">
                   <div className="flex items-center gap-2">
                     <Activity className="w-5 h-5 text-cyber-accent" />
                     <h3 className="text-xl font-semibold text-cyber-text">
@@ -3627,11 +3642,12 @@ const ServerControlPage: React.FC = () => {
                 </div>
                 <button
                   onClick={() => setShowTasksDialog(false)}
-                  className="text-cyber-muted hover:text-cyber-text transition-colors">
+                  className="p-2 hover:bg-cyber-grid/50 rounded-lg transition-colors text-cyber-muted hover:text-cyber-text">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
+              <div className="overflow-y-auto flex-1 min-h-0 pr-2">
               {serverTasks.length === 0 ? (
                 <div className="text-center py-8 text-cyber-muted">
                   暂无任务记录
@@ -3686,11 +3702,12 @@ const ServerControlPage: React.FC = () => {
                   </table>
                 </div>
               )}
+              </div>
 
-              <div className="flex justify-end mt-6">
+              <div className="flex justify-end gap-3 mt-4 pt-4 border-t border-cyber-accent/20 flex-shrink-0">
                 <button
                   onClick={() => setShowTasksDialog(false)}
-                  className="px-4 py-2 bg-cyber-accent text-white rounded-lg hover:bg-cyber-accent/80 transition-all">
+                  className="px-6 py-2.5 border border-cyber-accent/30 rounded-md text-cyber-text hover:bg-cyber-accent/5 transition-colors">
                   关闭
                 </button>
               </div>
@@ -3710,57 +3727,71 @@ const ServerControlPage: React.FC = () => {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="cyber-card max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-4">
+                className="cyber-card max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <div className="flex items-center justify-between mb-3 flex-shrink-0">
                   <div className="flex items-center gap-2">
                   <HardDrive className="w-5 h-5 text-orange-400" />
-                  <h3 className="text-xl font-semibold text-cyber-text">
+                  <h3 className="text-lg font-semibold text-cyber-text">
                     启动模式 - {selectedServer?.name}
                   </h3>
                 </div>
                 <button
                   onClick={() => setShowBootModeDialog(false)}
-                  className="text-cyber-muted hover:text-cyber-text transition-colors">
+                  className="p-1.5 hover:bg-cyber-grid/50 rounded-lg transition-colors text-cyber-muted hover:text-cyber-text">
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <p className="text-cyber-muted text-sm mb-4">
+              <p className="text-cyber-muted text-xs mb-3 flex-shrink-0">
                 选择服务器的启动模式。切换后需要重启服务器才能生效。
               </p>
 
-              <div className="space-y-3">
-                {bootModes.map((mode) => (
-                  <div
-                    key={mode.id}
-                    className={`p-4 border-2 rounded-lg transition-all cursor-pointer ${
-                      mode.active
-                        ? 'border-cyber-accent bg-cyber-accent/10'
-                        : 'border-cyber-accent/20 hover:border-cyber-accent/40 hover:bg-cyber-grid/30'
-                    }`}
-                    onClick={() => !mode.active && changeBootMode(mode.id)}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-lg font-semibold text-cyber-text">{mode.bootType}</h4>
-                          {mode.active && (
-                            <span className="px-2 py-1 bg-cyber-accent text-white text-xs rounded">当前</span>
-                          )}
+              <div className="overflow-y-auto flex-1 min-h-0 pr-2">
+                <div className="grid grid-cols-2 gap-3">
+                  {bootModes.map((mode) => {
+                    // 根据启动类型选择图标
+                    const getIcon = () => {
+                      const type = mode.bootType.toLowerCase();
+                      if (type.includes('hard') || type.includes('disk')) return HardDrive;
+                      if (type.includes('rescue') || type.includes('ipxe')) return Shield;
+                      if (type.includes('power') || type.includes('off')) return Power;
+                      if (type.includes('network')) return Network;
+                      return Database;
+                    };
+                    const Icon = getIcon();
+                    
+                    return (
+                      <button
+                        key={mode.id}
+                        className={`p-4 border rounded-lg transition-all text-left ${
+                          mode.active
+                            ? 'border-cyber-accent bg-cyber-accent/10 cursor-default'
+                            : 'border-cyber-accent/20 hover:border-cyber-accent/40 hover:bg-cyber-grid/30 cursor-pointer'
+                        }`}
+                        onClick={() => !mode.active && changeBootMode(mode.id)}
+                        disabled={mode.active}>
+                        <div className="flex flex-col items-center text-center gap-2">
+                          <Icon className={`w-8 h-8 ${mode.active ? 'text-cyber-accent' : 'text-cyber-muted'}`} />
+                          <div className="w-full">
+                            <div className="flex items-center justify-center gap-1.5 mb-1">
+                              <h4 className="text-sm font-semibold text-cyber-text">{mode.bootType}</h4>
+                              {mode.active && (
+                                <Check className="w-3.5 h-3.5 text-cyber-accent" />
+                              )}
+                            </div>
+                            <p className="text-xs text-cyber-muted line-clamp-2">{mode.description}</p>
+                          </div>
                         </div>
-                        <p className="text-sm text-cyber-muted mt-1">{mode.description}</p>
-                        {mode.kernel && (
-                          <p className="text-xs text-cyber-muted/70 mt-1 font-mono">{mode.kernel}</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              <div className="flex justify-end mt-6">
+              <div className="flex justify-end gap-3 mt-3 pt-3 border-t border-cyber-accent/20 flex-shrink-0">
                 <button
                   onClick={() => setShowBootModeDialog(false)}
-                  className="px-4 py-2 bg-cyber-accent text-white rounded-lg hover:bg-cyber-accent/80 transition-all">
+                  className="px-4 py-2 border border-cyber-accent/30 rounded-md text-sm text-cyber-text hover:bg-cyber-accent/5 transition-colors">
                   关闭
                 </button>
               </div>
@@ -4076,8 +4107,8 @@ const ServerControlPage: React.FC = () => {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="cyber-card max-w-lg w-full max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-4">
+                className="cyber-card max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col">
+                <div className="flex items-center justify-between mb-4 flex-shrink-0">
                   <div className="flex items-center gap-2">
                     <Cpu className="w-5 h-5 text-purple-400" />
                     <h3 className="text-xl font-semibold text-cyber-text">
@@ -4091,31 +4122,32 @@ const ServerControlPage: React.FC = () => {
                       setHardwareReplaceComment('');
                       setHardwareReplaceDetails('');
                     }}
-                    className="text-cyber-muted hover:text-cyber-text transition-colors">
+                    className="p-2 hover:bg-cyber-grid/50 rounded-lg transition-colors text-cyber-muted hover:text-cyber-text">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                <p className="text-cyber-muted text-sm mb-4">
+                <p className="text-cyber-muted text-sm mb-4 flex-shrink-0">
                   为 {selectedServer?.name} 提交硬件更换申请
                 </p>
 
-                {!hardwareReplaceType ? (
-                  /* 硬件类型选择界面 */
-                  <div className="space-y-3">
-                    <p className="text-cyber-text font-medium mb-3">请选择要更换的硬件类型：</p>
-                    
-                    <button
-                      onClick={() => setHardwareReplaceType('hardDiskDrive')}
-                      className="w-full p-4 bg-red-500/10 border-2 border-red-500/30 rounded-lg text-left hover:bg-red-500/20 hover:border-red-500/50 transition-all group">
-                      <div className="flex items-center gap-3">
-                        <HardDrive className="w-6 h-6 text-red-400" />
-                        <div>
-                          <h4 className="text-lg font-semibold text-red-400 group-hover:text-red-300">硬盘驱动器</h4>
-                          <p className="text-sm text-cyber-muted mt-1">申请更换故障或损坏的硬盘</p>
+                <div className="overflow-y-auto flex-1 min-h-0 pr-2">
+                  {!hardwareReplaceType ? (
+                    /* 硬件类型选择界面 */
+                    <div className="space-y-3">
+                      <p className="text-cyber-text font-medium mb-3">请选择要更换的硬件类型：</p>
+                      
+                      <button
+                        onClick={() => setHardwareReplaceType('hardDiskDrive')}
+                        className="w-full p-4 bg-red-500/10 border-2 border-red-500/30 rounded-lg text-left hover:bg-red-500/20 hover:border-red-500/50 transition-all group">
+                        <div className="flex items-center gap-3">
+                          <HardDrive className="w-6 h-6 text-red-400" />
+                          <div>
+                            <h4 className="text-lg font-semibold text-red-400 group-hover:text-red-300">硬盘驱动器</h4>
+                            <p className="text-sm text-cyber-muted mt-1">申请更换故障或损坏的硬盘</p>
+                          </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
 
                     <button
                       onClick={() => setHardwareReplaceType('memory')}
@@ -4235,19 +4267,20 @@ const ServerControlPage: React.FC = () => {
                       <button
                         onClick={() => setHardwareReplaceType('')}
                         disabled={isProcessing}
-                        className="px-4 py-2 bg-cyber-grid/50 border border-cyber-accent/30 rounded-lg text-cyber-text hover:bg-cyber-accent/10 disabled:opacity-50">
+                        className="px-6 py-2.5 border border-cyber-accent/30 rounded-md text-cyber-text hover:bg-cyber-accent/5 transition-colors disabled:opacity-50">
                         返回
                       </button>
                       <button
                         onClick={handleHardwareReplace}
                         disabled={isProcessing}
-                        className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:opacity-50 flex items-center gap-2">
+                        className="px-6 py-2.5 border border-cyber-accent/30 rounded-md text-cyber-text hover:bg-cyber-accent/5 transition-colors disabled:opacity-50 flex items-center gap-2">
                         {isProcessing && <RefreshCw className="w-4 h-4 animate-spin" />}
                         提交申请
                       </button>
                     </div>
                   </div>
                 )}
+                </div>
               </motion.div>
             </div>
           )}
@@ -4259,7 +4292,7 @@ const ServerControlPage: React.FC = () => {
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="cyber-card max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+                className="cyber-card max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-2">
                     <Mail className="w-5 h-5 text-green-400" />
@@ -4275,13 +4308,13 @@ const ServerControlPage: React.FC = () => {
                       setContactBilling('');
                       setContactDialogTab('submit');
                     }}
-                    className="text-cyber-muted hover:text-cyber-text transition-colors">
+                    className="p-2 hover:bg-cyber-grid/50 rounded-lg transition-colors text-cyber-muted hover:text-cyber-text">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
                 {/* 标签页 */}
-                <div className="flex gap-2 mb-4 border-b border-cyber-accent/20">
+                <div className="flex gap-2 mb-4 border-b border-cyber-accent/20 flex-shrink-0">
                   <button
                     onClick={() => setContactDialogTab('submit')}
                     className={`px-4 py-2 font-medium transition-colors ${
@@ -4305,6 +4338,7 @@ const ServerControlPage: React.FC = () => {
                   </button>
                 </div>
 
+                <div className="overflow-y-auto flex-1 min-h-0 pr-2">
                 {/* 提交变更标签页 */}
                 {contactDialogTab === 'submit' && (
                 <div className="space-y-4">
@@ -4404,13 +4438,13 @@ const ServerControlPage: React.FC = () => {
                         setContactDialogTab('submit');
                       }}
                       disabled={loadingChangeContact}
-                      className="px-4 py-2 bg-cyber-grid/50 border border-cyber-accent/30 rounded-lg text-cyber-text hover:bg-cyber-accent/10 disabled:opacity-50">
+                      className="px-6 py-2.5 border border-cyber-accent/30 rounded-md text-cyber-text hover:bg-cyber-accent/5 transition-colors disabled:opacity-50">
                       取消
                     </button>
                     <button
                       onClick={handleChangeContact}
                       disabled={loadingChangeContact}
-                      className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:opacity-50 flex items-center gap-2">
+                      className="px-6 py-2.5 border border-cyber-accent/30 rounded-md text-cyber-text hover:bg-cyber-accent/5 transition-colors disabled:opacity-50 flex items-center gap-2">
                       {loadingChangeContact && <RefreshCw className="w-4 h-4 animate-spin" />}
                       提交变更
                     </button>
@@ -4527,6 +4561,7 @@ const ServerControlPage: React.FC = () => {
                     )}
                   </div>
                 )}
+                </div>
               </motion.div>
             </div>
           )}
@@ -4553,7 +4588,7 @@ const ServerControlPage: React.FC = () => {
                       setTokenAction(null);
                       setSelectedRequest(null);
                     }}
-                    className="text-cyber-muted hover:text-cyber-text transition-colors">
+                    className="p-2 hover:bg-cyber-grid/50 rounded-lg transition-colors text-cyber-muted hover:text-cyber-text">
                     <X className="w-5 h-5" />
                   </button>
                 </div>
@@ -4619,17 +4654,15 @@ const ServerControlPage: React.FC = () => {
                         setSelectedRequest(null);
                       }}
                       disabled={loadingTokenAction}
-                      className="px-4 py-2 bg-cyber-grid/50 border border-cyber-accent/30 rounded-lg text-cyber-text hover:bg-cyber-accent/10 disabled:opacity-50">
+                      className="px-6 py-2.5 border border-cyber-accent/30 rounded-md text-cyber-text hover:bg-cyber-accent/5 transition-colors disabled:opacity-50"
+                    >
                       取消
                     </button>
                     <button
                       onClick={handleTokenAction}
                       disabled={loadingTokenAction || !token}
-                      className={`px-4 py-2 rounded-lg text-white disabled:opacity-50 flex items-center gap-2 ${
-                        tokenAction === 'accept'
-                          ? 'bg-green-500 hover:bg-green-600'
-                          : 'bg-red-500 hover:bg-red-600'
-                      }`}>
+                      className="px-6 py-2.5 border border-cyber-accent/30 rounded-md text-cyber-text hover:bg-cyber-accent/5 transition-colors disabled:opacity-50 flex items-center gap-2"
+                    >
                       {loadingTokenAction && <RefreshCw className="w-4 h-4 animate-spin" />}
                       {tokenAction === 'accept' ? '确认接受' : '确认拒绝'}
                     </button>
@@ -4659,24 +4692,27 @@ const ServerControlPage: React.FC = () => {
 
               {/* 对话框内容 */}
               <motion.div
-                initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                className="relative bg-gradient-to-br from-cyber-bg via-cyber-grid to-cyber-bg border border-cyber-accent rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
-                
-                {/* 顶部装饰线 */}
-                <div className="h-1 bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500" />
-                
-                <div className="p-6">
-                  {/* 标题 */}
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="p-2 bg-gradient-to-r from-purple-500/20 to-pink-500/20 rounded-lg">
-                      <Activity className="w-6 h-6 text-purple-400" />
-                    </div>
-                    <h3 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">
-                      智能配置将根据磁盘组自动生成最佳方案：
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="cyber-card max-w-md w-full">
+                <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-5 h-5 text-cyber-accent" />
+                    <h3 className="text-xl font-semibold text-cyber-text">
+                      智能配置确认
                     </h3>
                   </div>
+                  <button
+                    onClick={() => setShowSmartConfigDialog(false)}
+                    className="p-2 hover:bg-cyber-grid/50 rounded-lg transition-colors text-cyber-muted hover:text-cyber-text">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <p className="text-cyber-muted text-sm mb-4">
+                  智能配置将根据磁盘组自动生成最佳方案
+                </p>
 
                   {/* 磁盘信息 */}
                   <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-4 mb-4">
@@ -4737,7 +4773,7 @@ const ServerControlPage: React.FC = () => {
                   <div className="flex justify-end gap-3">
                     <button
                       onClick={() => setShowSmartConfigDialog(false)}
-                      className="px-6 py-2.5 bg-cyber-grid/50 border border-cyber-accent/30 rounded-lg text-cyber-text hover:bg-cyber-accent/10 transition-all">
+                      className="px-6 py-2.5 border border-cyber-accent/30 rounded-md text-cyber-text hover:bg-cyber-accent/5 transition-colors">
                       取消
                     </button>
                     <button
@@ -4745,12 +4781,11 @@ const ServerControlPage: React.FC = () => {
                         applySmartConfig();
                         setShowSmartConfigDialog(false);
                       }}
-                      className="px-6 py-2.5 bg-gradient-to-r from-cyan-500 to-purple-500 text-white rounded-lg hover:from-cyan-600 hover:to-purple-600 transition-all shadow-lg shadow-cyan-500/20 flex items-center gap-2">
+                      className="px-6 py-2.5 border border-cyber-accent/30 rounded-md text-cyber-text hover:bg-cyber-accent/5 transition-colors flex items-center gap-2">
                       <Check className="w-4 h-4" />
                       确定
                     </button>
                   </div>
-                </div>
               </motion.div>
             </div>
           )}
@@ -4774,55 +4809,28 @@ const ServerControlPage: React.FC = () => {
 
               {/* 对话框内容 */}
               <motion.div
-                initial={{ opacity: 0, scale: 0.96, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.96, y: 20 }}
-                className="relative bg-cyber-bg/95 backdrop-blur-xl border border-cyan-500/30 rounded-xl shadow-2xl shadow-cyan-500/10 max-w-6xl w-full max-h-[88vh] overflow-hidden">
-                
-                {/* 顶部装饰线 */}
-                <div className="h-0.5 bg-gradient-to-r from-cyan-500 via-blue-500 to-purple-500" />
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="cyber-card max-w-6xl w-full max-h-[88vh] overflow-hidden flex flex-col">
                 
                 {/* 标题栏 */}
-                <div className="flex items-center justify-between px-4 py-2.5 border-b border-cyan-500/20 bg-gradient-to-r from-cyan-500/5 to-transparent">
+                <div className="flex items-center justify-between mb-4 flex-shrink-0">
                   <div className="flex items-center gap-2">
-                    <div className="p-1.5 bg-gradient-to-br from-cyan-500/20 to-blue-500/20 rounded-lg border border-cyan-500/30">
-                      <Wifi className="w-4 h-4 text-cyan-400" />
-                    </div>
-                    <div>
-                      <h3 className="text-base font-bold text-cyber-text flex items-center gap-1.5">
-                        网络规格
-                        {loadingNetworkSpecs && (
-                          <RefreshCw className="w-3 h-3 animate-spin text-cyan-400" />
-                        )}
-                      </h3>
-                      <p className="text-[10px] text-cyber-muted/80 leading-none">
-                        {selectedServer?.name} · {selectedServer?.serviceName}
-                      </p>
-                    </div>
+                    <Wifi className="w-5 h-5 text-cyber-accent" />
+                    <h3 className="text-xl font-semibold text-cyber-text">
+                      网络规格 - {selectedServer?.name}
+                    </h3>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => selectedServer && fetchNetworkSpecs(selectedServer.serviceName)}
-                      disabled={loadingNetworkSpecs}
-                      className="relative w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center bg-cyber-bg/60 hover:bg-cyan-500/10 border border-cyan-500/40 hover:border-cyan-500/60 rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 group overflow-hidden"
-                      title="刷新">
-                      <RefreshCw className={`relative z-10 w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400 group-hover:text-cyan-300 transition-colors duration-200 ${loadingNetworkSpecs ? 'animate-spin' : ''}`} />
-                      <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-cyan-500/0 via-cyan-500/0 to-blue-500/0 group-hover:from-cyan-500/10 group-hover:via-cyan-500/5 group-hover:to-blue-500/10 transition-all duration-200 pointer-events-none" />
-                      <div className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 bg-cyan-500/5 blur-sm transition-opacity duration-200 pointer-events-none" />
-                    </button>
-                    <button
-                      onClick={() => setShowNetworkSpecsDialog(false)}
-                      className="relative w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center bg-cyber-bg/60 hover:bg-red-500/10 border border-red-500/40 hover:border-red-500/60 rounded-lg transition-all duration-200 group active:scale-95 overflow-hidden"
-                      title="关闭">
-                      <X className="relative z-10 w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-400 group-hover:text-red-300 transition-colors duration-200" />
-                      <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-red-500/0 via-red-500/0 to-orange-500/0 group-hover:from-red-500/10 group-hover:via-red-500/5 group-hover:to-orange-500/10 transition-all duration-200 pointer-events-none" />
-                      <div className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 bg-red-500/5 blur-sm transition-opacity duration-200 pointer-events-none" />
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => setShowNetworkSpecsDialog(false)}
+                    className="p-2 hover:bg-cyber-grid/50 rounded-lg transition-colors text-cyber-muted hover:text-cyber-text">
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
 
                 {/* 内容区域 */}
-                <div className="p-4 overflow-y-auto max-h-[calc(88vh-48px)] custom-scrollbar">
+                <div className="overflow-y-auto flex-1 min-h-0 pr-2">
                   {loadingNetworkSpecs ? (
                     <div className="flex items-center justify-center py-12">
                       <RefreshCw className="w-8 h-8 animate-spin text-cyber-accent" />
@@ -5181,39 +5189,28 @@ const ServerControlPage: React.FC = () => {
               />
 
               <motion.div
-                initial={{ opacity: 0, scale: 0.96, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.96, y: 20 }}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
                 onClick={(e) => e.stopPropagation()}
-                className="relative bg-cyber-bg/95 backdrop-blur-xl border border-yellow-500/30 rounded-xl shadow-2xl shadow-yellow-500/10 max-w-5xl w-full max-h-[95vh] sm:max-h-[88vh] overflow-hidden flex flex-col">
+                className="cyber-card max-w-5xl w-full max-h-[90vh] overflow-hidden flex flex-col">
                 
-                <div className="h-0.5 bg-gradient-to-r from-yellow-500 via-orange-500 to-red-500" />
-                
-                {/* 标题栏 */}
-                <div className="flex items-center justify-between px-3 sm:px-4 py-2 sm:py-2.5 border-b border-yellow-500/20 bg-gradient-to-r from-yellow-500/5 to-transparent flex-shrink-0">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <div className="p-1.5 bg-gradient-to-br from-yellow-500/20 to-orange-500/20 rounded-lg border border-yellow-500/30 flex-shrink-0">
-                      <Settings className="w-4 h-4 text-yellow-400" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h3 className="text-sm sm:text-base font-bold text-cyber-text truncate">高级功能管理</h3>
-                      <p className="text-[10px] text-cyber-muted/80 leading-none truncate">
-                        {selectedServer?.name} · {selectedServer?.serviceName}
-                      </p>
-                    </div>
+                <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    <Settings className="w-5 h-5 text-cyber-accent" />
+                    <h3 className="text-xl font-semibold text-cyber-text">
+                      高级功能管理 - {selectedServer?.name}
+                    </h3>
                   </div>
                   <button
                     onClick={() => setShowAdvancedDialog(false)}
-                    className="relative w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center bg-cyber-bg/60 hover:bg-red-500/10 border border-red-500/40 hover:border-red-500/60 rounded-lg transition-all duration-200 group active:scale-95 flex-shrink-0 ml-2 overflow-hidden"
-                    title="关闭">
-                    <X className="relative z-10 w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-400 group-hover:text-red-300 transition-colors duration-200" />
-                    <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-red-500/0 via-red-500/0 to-orange-500/0 group-hover:from-red-500/10 group-hover:via-red-500/5 group-hover:to-orange-500/10 transition-all duration-200 pointer-events-none" />
-                    <div className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 bg-red-500/5 blur-sm transition-opacity duration-200 pointer-events-none" />
+                    className="p-2 hover:bg-cyber-grid/50 rounded-lg transition-colors text-cyber-muted hover:text-cyber-text">
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
 
                 {/* 标签页导航 */}
-                <div className="flex items-center gap-1 px-2 sm:px-4 py-2 border-b border-cyber-accent/20 overflow-x-auto flex-shrink-0 scrollbar-hide">
+                <div className="flex items-center gap-2 mb-4 border-b border-cyber-accent/20 pb-2 overflow-x-auto flex-shrink-0">
                   <button
                     onClick={() => { setAdvancedTab('burst'); selectedServer && fetchBurst(selectedServer.serviceName); }}
                     className={`px-2 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-xs font-medium transition-all duration-200 whitespace-nowrap flex items-center gap-1 active:scale-95 ${

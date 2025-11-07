@@ -106,7 +106,18 @@ apiClient.interceptors.response.use(
           // notAvailable的400完全静默，让组件自行显示友好提示
           break;
         case 500:
-          toast.error('服务器错误');
+          // 检查是否是特定的"功能不支持"错误（如IPMI、BIOS等）
+          const errorMsg = (error.response.data as any)?.error || '';
+          const isFeatureUnsupported = 
+            errorMsg.includes('does not exist') || 
+            errorMsg.includes('not available') ||
+            errorMsg.includes('not supported');
+          
+          // 如果是功能不支持的错误，让组件自行处理（显示友好提示）
+          // 否则显示通用的服务器错误
+          if (!isFeatureUnsupported) {
+            toast.error('服务器错误');
+          }
           break;
         default:
           // 其他状态码才输出错误

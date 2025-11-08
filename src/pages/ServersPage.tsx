@@ -24,7 +24,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Cpu, Database, Wifi, HardDrive, CheckSquare, Square, Settings, ArrowRightLeft, Clock, Bell, Grid, List, Euro, DollarSign, Loader2 } from "lucide-react";
+import { Cpu, Database, Wifi, HardDrive, CheckSquare, Square, Settings, ArrowRightLeft, Clock, Bell, Grid, List, Euro, DollarSign, Loader2, Server, MapPin } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { apiEvents } from "@/context/APIContext";
 import { OVH_DATACENTERS, DatacenterInfo } from "@/config/ovhConstants"; // Import from new location
@@ -729,7 +729,7 @@ const ServersPage = () => {
   };
 
   // 切换特定服务器的数据中心选择状态
-  const toggleDatacenterSelection = (serverPlanCode: string, datacenter: string, event?: React.MouseEvent<HTMLDivElement>) => {
+  const toggleDatacenterSelection = (serverPlanCode: string, datacenter: string, event?: React.MouseEvent<HTMLElement>) => {
     if (event) {
       event.stopPropagation();
     }
@@ -2085,7 +2085,7 @@ const ServersPage = () => {
                     </div>
                     
                     {/* 数据中心列表 - 按区域分组 */}
-                    <div className="bg-slate-900/10 p-3 sm:p-4">
+                    <div className="bg-slate-900/10 p-4 sm:p-5 overflow-hidden">
                       {Object.entries(DATACENTER_REGIONS).map(([region, dcCodes]) => {
                         const regionDatacenters = OVH_DATACENTERS
                           .filter(dc => dcCodes.includes(dc.code))
@@ -2100,9 +2100,9 @@ const ServersPage = () => {
                         if (regionDatacenters.length === 0) return null;
 
                         return (
-                          <div key={region} className="mb-5 last:mb-0">
-                            <h3 className="text-xs font-bold text-cyber-accent/90 mb-3">{region}</h3>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                          <div key={region} className="mb-6 last:mb-0">
+                            <h3 className="text-sm font-semibold text-blue-500 mb-3.5 tracking-wide">{region}</h3>
+                            <div className="grid grid-cols-2 gap-3.5 w-full">
                               {regionDatacenters.map(dc => {
                                   const dcCode = dc.code.toUpperCase();
                                   const availStatus = availability[server.planCode]?.[dcCode.toLowerCase()];
@@ -2123,7 +2123,7 @@ const ServersPage = () => {
                                     // 有具体的可用性数据，显示"可用"
                                     statusText = availStatus.includes("H") ? availStatus : "可用";
                                     statusBgColor = "bg-green-400";
-                                    statusTextColor = "text-green-400/80";
+                                    statusTextColor = "text-green-400";
                                     showStatusText = true;
                                   } else {
                                     // 未检测或unknown状态，不显示状态文字
@@ -2131,32 +2131,46 @@ const ServersPage = () => {
                                     showStatusText = false;
                                   }
                                   
+                                  // 极致精细优化，完美复刻图片布局
                                   return (
-                                    <div 
+                                    <button
                                       key={dcCode}
-                                      className={`rounded-md border cursor-pointer transition-all duration-200 px-3 py-2.5 flex flex-col gap-1.5 min-w-0 ${
+                                      type="button"
+                                      className={`w-full px-3.5 py-2.5 rounded-lg transition-all flex flex-col items-start min-w-0 ${
                                         isSelected 
-                                          ? 'border-cyber-accent/70 bg-cyber-accent/12 text-cyber-accent shadow-sm' 
-                                          : 'border-slate-700/50 bg-slate-800/40 text-slate-300 hover:border-cyber-accent/50 hover:bg-slate-800/60'
+                                          ? 'bg-cyber-accent/25 border-2 border-cyber-accent shadow-lg shadow-cyber-accent/20' 
+                                          : 'bg-cyber-grid/50 border border-cyber-accent/30 hover:bg-cyber-accent/10 hover:border-cyber-accent/50'
                                       }`}
                                       onClick={(e) => toggleDatacenterSelection(server.planCode, dcCode, e)}
                                       title={`${dc.name} (${dc.region})${statusText ? ` - ${statusText}` : ''}`}
                                     >
-                                      <div className="flex items-center justify-between gap-1.5">
-                                        <span className="text-xs font-semibold tracking-wide whitespace-nowrap">{dcCode}</span>
-                                        <span className={`w-2 h-2 rounded-full ${statusBgColor} flex-shrink-0`}></span>
+                                      {/* 第一行：代码（左，粗体白色） + 状态点（右，小圆点） */}
+                                      <div className="flex items-center justify-between w-full mb-1.5">
+                                        <span className={`text-xs font-bold tracking-wide leading-none ${
+                                          isSelected ? 'text-cyber-accent' : 'text-white'
+                                        }`}>{dcCode}</span>
+                                        <span className={`w-[6px] h-[6px] rounded-full ${statusBgColor} flex-shrink-0`}></span>
                                       </div>
-                                      <div className="min-w-0 text-center">
-                                        <span className="text-[10px] text-slate-400/90 break-words leading-snug">{dc.name}</span>
+                                      
+                                      {/* 第二行：图标（左，白色轮廓） + 中文名称（右，白色文字） */}
+                                      <div className="flex items-center gap-1.5 w-full min-w-0 mb-1">
+                                        <MapPin 
+                                          className={`w-3.5 h-3.5 flex-shrink-0 ${isSelected ? 'text-cyber-accent' : 'text-white'}`}
+                                          strokeWidth={2}
+                                          fill="none"
+                                        />
+                                        <span className={`text-[10px] leading-[1.35] flex-1 break-words font-normal ${
+                                          isSelected ? 'text-cyber-accent/90' : 'text-white'
+                                        }`}>{dc.name}</span>
                                       </div>
-                                      <div className="text-center h-[14px] flex items-center justify-center">
+                                      
+                                      {/* 第三行：状态文字（固定高度14px，左对齐，防止布局抖动） */}
+                                      <div className="w-full h-[14px] flex items-center">
                                         {showStatusText ? (
-                                          <span className={`text-[10px] font-medium whitespace-nowrap ${statusTextColor}`}>{statusText}</span>
-                                        ) : (
-                                          <span className="text-[10px] font-medium whitespace-nowrap opacity-0">占位</span>
-                                        )}
+                                          <span className={`text-[10px] font-semibold leading-none ${statusTextColor} tracking-tight`}>{statusText}</span>
+                                        ) : null}
                                       </div>
-                                    </div>
+                                    </button>
                                   );
                                 })}
                             </div>

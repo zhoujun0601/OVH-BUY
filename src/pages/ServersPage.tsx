@@ -2100,9 +2100,9 @@ const ServersPage = () => {
                         if (regionDatacenters.length === 0) return null;
 
                         return (
-                          <div key={region} className="mb-4 last:mb-0">
-                            <h3 className="text-xs font-bold text-cyber-accent/80 mb-2.5">{region}</h3>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                          <div key={region} className="mb-5 last:mb-0">
+                            <h3 className="text-xs font-bold text-cyber-accent/90 mb-3">{region}</h3>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
                               {regionDatacenters.map(dc => {
                                   const dcCode = dc.code.toUpperCase();
                                   const availStatus = availability[server.planCode]?.[dcCode.toLowerCase()] || "unknown";
@@ -2125,20 +2125,20 @@ const ServersPage = () => {
                                   return (
                                     <div 
                                       key={dcCode}
-                                      className={`rounded border cursor-pointer transition-colors duration-150 px-2.5 py-2 flex flex-col gap-1.5 min-w-0 ${
+                                      className={`rounded-md border cursor-pointer transition-all duration-200 px-3 py-2.5 flex flex-col gap-1.5 min-w-0 ${
                                         isSelected 
-                                          ? 'border-cyber-accent/60 bg-cyber-accent/10 text-cyber-accent' 
-                                          : 'border-slate-700/40 bg-slate-800/30 text-slate-300 hover:border-cyber-accent/40 hover:bg-slate-800/50'
+                                          ? 'border-cyber-accent/70 bg-cyber-accent/12 text-cyber-accent shadow-sm' 
+                                          : 'border-slate-700/50 bg-slate-800/40 text-slate-300 hover:border-cyber-accent/50 hover:bg-slate-800/60'
                                       }`}
                                       onClick={(e) => toggleDatacenterSelection(server.planCode, dcCode, e)}
                                       title={`${dc.name} (${dc.region})${statusText ? ` - ${statusText}` : ''}`}
                                     >
-                                      <div className="flex items-center justify-between gap-1">
-                                        <span className="text-xs font-medium tracking-wide whitespace-nowrap">{dcCode}</span>
-                                        <span className={`w-1.5 h-1.5 rounded-full ${statusBgColor} flex-shrink-0`}></span>
+                                      <div className="flex items-center justify-between gap-1.5">
+                                        <span className="text-xs font-semibold tracking-wide whitespace-nowrap">{dcCode}</span>
+                                        <span className={`w-2 h-2 rounded-full ${statusBgColor} flex-shrink-0`}></span>
                                       </div>
-                                      <div className="min-w-0">
-                                        <span className="text-[10px] text-slate-400 break-words leading-tight">{dc.name}</span>
+                                      <div className="min-w-0 text-center">
+                                        <span className="text-[10px] text-slate-400/90 break-words leading-snug">{dc.name}</span>
                                       </div>
                                       {showStatusText && (
                                         <div className="text-center">

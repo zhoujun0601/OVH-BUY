@@ -2113,9 +2113,9 @@ const ServersPage = () => {
                                   let statusTextColor = "";
                                   let showStatusText = false;
                                   
-                                  // 只显示"可用"和"不可用"两种状态
+                                  // 只显示"可用"和"缺货"两种状态
                                   if (availStatus === "unavailable") {
-                                    statusText = "不可用";
+                                    statusText = "缺货";
                                     statusBgColor = "bg-red-400";
                                     statusTextColor = "text-red-400";
                                     showStatusText = true;
@@ -2136,37 +2136,30 @@ const ServersPage = () => {
                                     <button
                                       key={dcCode}
                                       type="button"
-                                      className="w-full px-3.5 py-2.5 rounded-lg transition-all duration-200 flex flex-col items-start min-w-0 bg-cyber-grid/50 border border-cyber-accent/30 hover:bg-cyber-accent/8 hover:border-cyber-accent/45"
+                                      className="w-full px-3.5 pt-2.5 pb-3 rounded-lg transition-all duration-200 flex flex-col items-start min-w-0 bg-cyber-grid/50 border border-cyber-accent/30 hover:bg-cyber-accent/8 hover:border-cyber-accent/45"
                                       onClick={(e) => toggleDatacenterSelection(server.planCode, dcCode, e)}
                                       title={`${dc.name} (${dc.region})${statusText ? ` - ${statusText}` : ''}`}
                                     >
-                                      {/* 第一行：代码（左，粗体白色） + 状态点/打勾（右，固定宽度防止布局变化） */}
-                                      <div className="flex items-center justify-between w-full mb-[7px]">
+                                      {/* 第一行：代码（左） + 可用性状态（中） + 状态点/打勾（右） */}
+                                      <div className="flex items-center justify-between w-full mb-1.5 gap-2">
                                         <span className="text-xs font-bold tracking-wide leading-none text-white transition-colors duration-200">{dcCode}</span>
-                                        <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
-                                          {isSelected ? (
-                                            <Check className="w-4 h-4 text-green-400" strokeWidth={3} />
-                                          ) : (
-                                            <span className={`w-[6px] h-[6px] rounded-full ${statusBgColor} transition-all duration-200`}></span>
+                                        <div className="flex items-center gap-2 flex-1 justify-end">
+                                          {showStatusText && (
+                                            <span className={`text-[10px] font-semibold leading-none ${statusTextColor} tracking-tight transition-colors duration-200`}>{statusText}</span>
                                           )}
+                                          <div className="w-4 h-4 flex items-center justify-center flex-shrink-0">
+                                            {isSelected ? (
+                                              <Check className="w-4 h-4 text-green-400" strokeWidth={3} />
+                                            ) : (
+                                              <span className={`w-[6px] h-[6px] rounded-full ${statusBgColor} transition-all duration-200`}></span>
+                                            )}
+                                          </div>
                                         </div>
                                       </div>
                                       
-                                      {/* 第二行：图标（左，白色轮廓） + 中文名称（右，白色文字） */}
-                                      <div className="flex items-center gap-1.5 w-full min-w-0 mb-[5px]">
-                                        <MapPin 
-                                          className="w-3.5 h-3.5 flex-shrink-0 text-white/95 transition-colors duration-200"
-                                          strokeWidth={2}
-                                          fill="none"
-                                        />
-                                        <span className="text-[10px] leading-[1.35] flex-1 break-words font-normal text-white/90 transition-colors duration-200">{dc.name}</span>
-                                      </div>
-                                      
-                                      {/* 第三行：状态文字（固定高度14px，左对齐，防止布局抖动） */}
-                                      <div className="w-full h-[14px] flex items-center">
-                                        {showStatusText ? (
-                                          <span className={`text-[10px] font-semibold leading-none ${statusTextColor} tracking-tight transition-colors duration-200`}>{statusText}</span>
-                                        ) : null}
+                                      {/* 第二行：国家/地区 + 城市名称（白色文字，居中显示） */}
+                                      <div className="w-full min-w-0 flex-1 flex items-center">
+                                        <span className="text-[10px] leading-[1.35] break-words font-normal text-white/90 transition-colors duration-200">{dc.region} - {dc.name}</span>
                                       </div>
                                     </button>
                                   );

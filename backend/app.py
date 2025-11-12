@@ -4691,7 +4691,42 @@ def install_os(service_name):
         
         # Proxmox 9 + ZFS 根文件系统预设
         if data.get('useProxmox9Zfs'):
-            add_log("INFO", f"🎯 使用 Proxmox 9 + ZFS 根文件系统预设", "server_control")
+            raid_level = data.get('zfsRaidLevel', 1)  # 默认 RAID1
+            vz_size_mb = data.get('zfsVzSize', 102400)  # 默认 100GB
+            
+            add_log("INFO", f"🎯 使用 Proxmox 9 + ZFS 根文件系统预设 (RAID{raid_level})", "server_control")
+            
+            # 获取服务器硬件信息以计算实际容量
+            try:
+                hardware_info = client.get(f'/dedicated/server/{service_name}/specifications/hardware')
+                disk_groups = hardware_info.get('diskGroups', [])
+                
+                if disk_groups and len(disk_groups) > 0:
+                    first_group = disk_groups[0]
+                    disk_count = first_group.get('numberOfDisks', 2)
+                    single_disk_gb = first_group.get('diskSize', {}).get('value', 480)
+                    
+                    # 根据 RAID 级别计算总容量
+                    if raid_level == 0:
+                        total_capacity_gb = single_disk_gb * disk_count
+                    else:
+                        total_capacity_gb = single_disk_gb
+                    
+                    add_log("INFO", f"📊 检测到磁盘: {disk_count}x{single_disk_gb}GB, RAID{raid_level} 总容量: {total_capacity_gb}GB", "server_control")
+                else:
+                    # 默认值
+                    total_capacity_gb = 960 if raid_level == 0 else 480
+                    add_log("WARNING", f"未检测到磁盘信息，使用默认容量: {total_capacity_gb}GB", "server_control")
+            except Exception as e:
+                # 获取硬件信息失败，使用默认值
+                total_capacity_gb = 960 if raid_level == 0 else 480
+                add_log("WARNING", f"获取硬件信息失败，使用默认容量: {total_capacity_gb}GB - {str(e)}", "server_control")
+            
+            # 计算根目录大小
+            # 减去: /boot(1GB) + swap(8GB) + /var/lib/vz
+            total_capacity_mb = total_capacity_gb * 1024
+            boot_swap_mb = 1024 + 8192  # 9GB
+            root_size_mb = total_capacity_mb - boot_swap_mb - vz_size_mb
             
             # Proxmox 强制要求独立的 /var/lib/vz 分区
             install_params['storage'] = [
@@ -4702,20 +4737,20 @@ def install_os(service_name):
                             {
                                 'fileSystem': 'ext4',
                                 'mountPoint': '/boot',
-                                'raidLevel': 1,
+                                'raidLevel': raid_level,
                                 'size': 1024
                             },
                             {
                                 'fileSystem': 'swap',
                                 'mountPoint': 'swap',
-                                'raidLevel': 1,
+                                'raidLevel': 1,  # swap 不支持 RAID0，必须用 RAID1
                                 'size': 8192
                             },
                             {
                                 'fileSystem': 'zfs',
                                 'mountPoint': '/',
-                                'raidLevel': 1,
-                                'size': 102400,  # 100GB for root (系统+应用)
+                                'raidLevel': raid_level,
+                                'size': root_size_mb,
                                 'extras': {
                                     'zp': {
                                         'name': 'rpool'
@@ -4725,8 +4760,8 @@ def install_os(service_name):
                             {
                                 'fileSystem': 'zfs',
                                 'mountPoint': '/var/lib/vz',
-                                'raidLevel': 1,
-                                'size': 0,  # 剩余空间 (VM/容器存储)
+                                'raidLevel': raid_level,
+                                'size': 0,  # 剩余空间
                                 'extras': {
                                     'zp': {
                                         'name': 'rpool'
@@ -4737,7 +4772,11 @@ def install_os(service_name):
                     }
                 }
             ]
-            add_log("INFO", f"✅ ZFS 配置: /boot (1GB) + swap (8GB) + / (100GB) + /var/lib/vz (剩余~350GB) - 全部 RAID1", "server_control")
+            
+            root_gb = root_size_mb // 1024
+            vz_gb = vz_size_mb // 1024
+            raid_type = f"RAID{raid_level}"
+            add_log("INFO", f"✅ ZFS 配置: /boot (1GB {raid_type}) + swap (8GB RAID1) + / ({root_gb}GB {raid_type}) + /var/lib/vz ({vz_gb}GB {raid_type})", "server_control")
         
         # 自定义存储配置 - OVH API格式的storage数组
         elif data.get('storageConfig'):

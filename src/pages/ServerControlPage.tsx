@@ -261,6 +261,36 @@ const ServerControlPage: React.FC = () => {
   
   // Proxmox 9 + ZFS
   const [useProxmox9Zfs, setUseProxmox9Zfs] = useState(false);
+  const [zfsRaidLevel, setZfsRaidLevel] = useState<0 | 1>(1); // RAID 级别：0 或 1
+  const [zfsVzSize, setZfsVzSize] = useState(102400); // /var/lib/vz 大小，默认 100GB (MB)
+
+  // 计算磁盘总容量（GB）
+  const calculateTotalDiskCapacity = (): number => {
+    const diskGroupsArray = Object.values(diskGroups);
+    if (diskGroupsArray.length === 0) return 960; // 默认值
+    
+    // 获取第一个磁盘组的信息
+    const firstGroup = diskGroupsArray[0];
+    const diskCount = firstGroup.disks?.length || 2;
+    const singleDiskCapacity = firstGroup.disks?.[0]?.capacity || 480;
+    
+    // 返回单盘容量（GB）
+    return singleDiskCapacity;
+  };
+
+  // 根据 RAID 级别计算可用容量
+  const getAvailableCapacity = (): number => {
+    const singleDiskGB = calculateTotalDiskCapacity();
+    const diskCount = Object.values(diskGroups)[0]?.disks?.length || 2;
+    
+    if (zfsRaidLevel === 0) {
+      // RAID0: 所有磁盘容量相加
+      return singleDiskGB * diskCount;
+    } else {
+      // RAID1: 只有一块盘的容量
+      return singleDiskGB;
+    }
+  };
   const [installCompleted, setInstallCompleted] = useState(false); // 标记安装是否已完成
   const [autoCloseCountdown, setAutoCloseCountdown] = useState(8); // 自动关闭倒计时
   const [installPollingInterval, setInstallPollingInterval] = useState<NodeJS.Timeout | null>(null);
@@ -779,7 +809,9 @@ const ServerControlPage: React.FC = () => {
       const installData: any = {
         templateName: selectedTemplate,
         customHostname: customHostname || undefined,
-        useProxmox9Zfs: useProxmox9Zfs  // 添加 Proxmox 9 ZFS 标志
+        useProxmox9Zfs: useProxmox9Zfs,  // 添加 Proxmox 9 ZFS 标志
+        zfsRaidLevel: useProxmox9Zfs ? zfsRaidLevel : undefined,  // RAID 级别
+        zfsVzSize: useProxmox9Zfs ? zfsVzSize : undefined  // /var/lib/vz 大小
       };
       
       // 如果用户启用了自定义存储配置或软RAID
@@ -2957,14 +2989,89 @@ const ServerControlPage: React.FC = () => {
                       </label>
                       
                       {useProxmox9Zfs && (
-                        <div className="mt-2 p-3 bg-green-500/20 rounded-lg text-xs space-y-1">
-                          <div className="text-green-300 font-medium mb-2">✅ ZFS 分区配置：</div>
-                          <div className="text-green-200">• /boot: ext4, 1GB, RAID1</div>
-                          <div className="text-green-200">• swap: 8GB, RAID1</div>
-                          <div className="text-green-200">• /: ZFS rpool, 100GB, RAID1 (系统+应用)</div>
-                          <div className="text-green-200">• /var/lib/vz: ZFS rpool, ~350GB, RAID1 (VM/容器)</div>
-                          <div className="text-green-300 mt-2 text-xs">
-                            💡 所有分区使用 RAID1 镜像保护数据
+                        <div className="mt-3 space-y-3">
+                          {/* RAID 级别选择 */}
+                          <div>
+                            <label className="block text-sm text-cyber-text mb-2">RAID 级别</label>
+                            <div className="flex gap-3">
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="zfsRaidLevel"
+                                  value="1"
+                                  checked={zfsRaidLevel === 1}
+                                  onChange={() => setZfsRaidLevel(1)}
+                                  className="w-4 h-4 text-green-500 focus:ring-green-500"
+                                />
+                                <span className="text-sm text-cyber-text">
+                                  RAID1 (镜像，数据冗余)
+                                </span>
+                              </label>
+                              <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="zfsRaidLevel"
+                                  value="0"
+                                  checked={zfsRaidLevel === 0}
+                                  onChange={() => setZfsRaidLevel(0)}
+                                  className="w-4 h-4 text-yellow-500 focus:ring-yellow-500"
+                                />
+                                <span className="text-sm text-cyber-text">
+                                  RAID0 (条带，最大容量)
+                                </span>
+                              </label>
+                            </div>
+                          </div>
+
+                          {/* /var/lib/vz 大小配置 */}
+                          <div>
+                            <label className="block text-sm text-cyber-text mb-2">
+                              /var/lib/vz 大小 (GB) - VM/容器存储
+                            </label>
+                            <input
+                              type="number"
+                              min="10"
+                              max={Math.floor(getAvailableCapacity() - 20)}
+                              value={zfsVzSize / 1024}
+                              onChange={(e) => {
+                                const maxVz = Math.floor(getAvailableCapacity() - 20);
+                                setZfsVzSize(Math.max(10, Math.min(maxVz, parseInt(e.target.value) || 100)) * 1024);
+                              }}
+                              className="w-32 px-3 py-2 bg-cyber-dark border border-green-500/30 rounded text-cyber-text text-sm focus:outline-none focus:border-green-500"
+                            />
+                            <span className="ml-2 text-xs text-cyber-muted">
+                              剩余空间将分配给根目录 (/) · 最大: {Math.floor(getAvailableCapacity() - 20)}GB
+                            </span>
+                          </div>
+
+                          {/* 分区预览 */}
+                          <div className="p-3 bg-green-500/20 rounded-lg text-xs space-y-1">
+                            <div className="text-green-300 font-medium mb-2">✅ 分区配置预览：</div>
+                            <div className="text-green-200">
+                              • /boot: ext4, 1GB, {zfsRaidLevel === 0 ? 'RAID0' : 'RAID1'}
+                            </div>
+                            <div className="text-green-200">
+                              • swap: 8GB, RAID1 (固定)
+                            </div>
+                            <div className="text-green-200">
+                              • /: ZFS rpool, ~{Math.floor(getAvailableCapacity() - 9 - zfsVzSize / 1024)}GB, {zfsRaidLevel === 0 ? 'RAID0' : 'RAID1'}
+                            </div>
+                            <div className="text-green-200">
+                              • /var/lib/vz: ZFS rpool, {zfsVzSize / 1024}GB, {zfsRaidLevel === 0 ? 'RAID0' : 'RAID1'}
+                            </div>
+                            <div className="text-cyan-300 mt-2 text-xs">
+                              📊 磁盘: {Object.values(diskGroups)[0]?.disks?.length || 2}x{calculateTotalDiskCapacity()}GB · 
+                              总容量: {getAvailableCapacity()}GB ({zfsRaidLevel === 0 ? 'RAID0' : 'RAID1'})
+                            </div>
+                            {zfsRaidLevel === 0 ? (
+                              <div className="text-yellow-300 mt-1 text-xs">
+                                ⚠️ RAID0: 最大容量，但无数据冗余保护
+                              </div>
+                            ) : (
+                              <div className="text-green-300 mt-1 text-xs">
+                                💡 RAID1: 数据镜像保护
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}

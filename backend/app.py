@@ -2775,10 +2775,241 @@ def get_telegram_webhook_info():
         add_log("ERROR", f"获取 Webhook 信息时出错: {str(e)}", "telegram")
         return jsonify({"success": False, "error": str(e)}), 500
 
+def parse_telegram_order_message(text):
+    """
+    解析Telegram下单消息格式
+    格式：plancode [datacenter] [quantity] [options]
+    
+    支持的模式：
+    1. 24sk202 - 只有plancode，使用所有可用配置和所有可用机房，数量默认为1
+    2. 24sk202 rbx 1 - plancode + 机房 + 数量
+    3. 24sk202 1 - plancode + 数量，不指定机房
+    4. 24sk202 rbx 1 ram-64g-ecc-2133-24sk20,softraid-2x450nvme-24sk20 - 完整格式
+    5. 24sk202 1 ram-64g-ecc-2133-24sk20,softraid-2x450nvme-24sk20 - plancode + 数量 + 可选参数，不指定机房
+    
+    Returns:
+        dict: {
+            "planCode": str,
+            "datacenter": str or None,  # None表示所有机房
+            "quantity": int,  # 默认为1
+            "options": list or None  # None表示所有可用配置
+        }
+    """
+    if not text or not text.strip():
+        return None
+    
+    parts = text.strip().split()
+    if len(parts) == 0:
+        return None
+    
+    result = {
+        "planCode": parts[0],
+        "datacenter": None,
+        "quantity": 1,
+        "options": None
+    }
+    
+    # 从第二个部分开始解析
+    remaining_parts = parts[1:] if len(parts) > 1 else []
+    
+    if not remaining_parts:
+        # 模式1：只有plancode
+        return result
+    
+    # 查找可选参数部分（包含逗号的部分，可能是最后一个或倒数第二个）
+    options_start_idx = None
+    for i, part in enumerate(remaining_parts):
+        if ',' in part:
+            # 找到包含逗号的部分，这是可选参数
+            options_start_idx = i
+            break
+    
+    # 如果有可选参数，先提取出来
+    if options_start_idx is not None:
+        # 合并从options_start_idx开始的所有部分
+        options_text = ' '.join(remaining_parts[options_start_idx:])
+        result["options"] = [opt.strip() for opt in options_text.split(',') if opt.strip()]
+        # 移除已处理的部分
+        remaining_parts = remaining_parts[:options_start_idx]
+    
+    # 解析剩余部分（datacenter 和 quantity）
+    # 可能的组合：
+    # - [datacenter] [quantity]
+    # - [quantity]
+    # - [datacenter]
+    
+    if len(remaining_parts) == 1:
+        # 只有一个部分，可能是datacenter或quantity
+        part = remaining_parts[0]
+        if part.isdigit():
+            result["quantity"] = int(part)
+        elif len(part) >= 3 and len(part) <= 4 and part.isalpha() and part.islower():
+            result["datacenter"] = part
+    elif len(remaining_parts) == 2:
+        # 两个部分，可能是 [datacenter] [quantity] 或 [quantity] [datacenter]
+        part1, part2 = remaining_parts[0], remaining_parts[1]
+        
+        # 检查第一个是否是datacenter（3-4个小写字母）
+        if len(part1) >= 3 and len(part1) <= 4 and part1.isalpha() and part1.islower():
+            result["datacenter"] = part1
+            if part2.isdigit():
+                result["quantity"] = int(part2)
+        # 或者第一个是数量，第二个是datacenter（不太常见，但支持）
+        elif part1.isdigit():
+            result["quantity"] = int(part1)
+            if len(part2) >= 3 and len(part2) <= 4 and part2.isalpha() and part2.islower():
+                result["datacenter"] = part2
+    
+    return result
+
+def process_telegram_order(plan_code, datacenter=None, quantity=1, options=None):
+    """
+    处理Telegram下单请求
+    规则：可用配置 × 可用机房 × 指定数量 = 总订单数
+    
+    Args:
+        plan_code: 服务器型号
+        datacenter: 指定机房（None表示所有可用机房）
+        quantity: 每个配置×每个机房的数量
+        options: 指定配置选项（None表示所有可用配置）
+    
+    Returns:
+        dict: {
+            "success": bool,
+            "message": str,
+            "total_orders": int,
+            "created_orders": int
+        }
+    """
+    try:
+        client = get_ovh_client()
+        if not client:
+            return {
+                "success": False,
+                "message": "OVH API客户端未初始化",
+                "total_orders": 0,
+                "created_orders": 0
+            }
+        
+        # 获取所有配置组合的可用性
+        availability_by_config = check_server_availability_with_configs(plan_code)
+        if not availability_by_config:
+            return {
+                "success": False,
+                "message": f"无法获取 {plan_code} 的可用性信息",
+                "total_orders": 0,
+                "created_orders": 0
+            }
+        
+        # 过滤配置
+        configs_to_order = []
+        if options:
+            # 用户指定了配置选项，需要匹配
+            for config_key, config_data in availability_by_config.items():
+                config_options = config_data.get("options", [])
+                # 检查用户指定的选项是否匹配
+                if set(options).issubset(set(config_options)):
+                    configs_to_order.append((config_key, config_data))
+        else:
+            # 使用所有可用配置
+            configs_to_order = list(availability_by_config.items())
+        
+        if not configs_to_order:
+            return {
+                "success": False,
+                "message": f"未找到匹配的配置（指定选项: {options}）",
+                "total_orders": 0,
+                "created_orders": 0
+            }
+        
+        # 收集所有有货的数据中心
+        available_datacenters = set()
+        for config_key, config_data in configs_to_order:
+            dc_map = config_data.get("datacenters", {})
+            for dc, status in dc_map.items():
+                if status and status not in ["unavailable", "unknown"]:
+                    available_datacenters.add(dc)
+        
+        if not available_datacenters:
+            return {
+                "success": False,
+                "message": f"所有配置在所有机房都无货",
+                "total_orders": 0,
+                "created_orders": 0
+            }
+        
+        # 如果指定了机房，只使用指定的机房
+        if datacenter:
+            if datacenter not in available_datacenters:
+                return {
+                    "success": False,
+                    "message": f"指定机房 {datacenter} 无货",
+                    "total_orders": 0,
+                    "created_orders": 0
+                }
+            datacenters_to_order = [datacenter]
+        else:
+            datacenters_to_order = list(available_datacenters)
+        
+        # 计算总订单数
+        total_orders = len(configs_to_order) * len(datacenters_to_order) * quantity
+        
+        # 创建订单
+        created_orders = 0
+        for config_key, config_data in configs_to_order:
+            config_options = config_data.get("options", [])
+            dc_map = config_data.get("datacenters", {})
+            
+            for dc in datacenters_to_order:
+                # 检查该配置在该机房是否有货
+                if dc_map.get(dc) in ["unavailable", "unknown"]:
+                    continue
+                
+                # 为每个数据中心创建 quantity 个订单
+                for i in range(quantity):
+                    queue_item = {
+                        "id": str(uuid.uuid4()),
+                        "planCode": plan_code,
+                        "datacenter": dc,
+                        "options": config_options,
+                        "status": "running",
+                        "createdAt": datetime.now().isoformat(),
+                        "updatedAt": datetime.now().isoformat(),
+                        "retryInterval": 30,
+                        "retryCount": 0,
+                        "lastCheckTime": 0,
+                        "fromTelegram": True  # 标记来自Telegram
+                    }
+                    
+                    queue.append(queue_item)
+                    created_orders += 1
+        
+        if created_orders > 0:
+            save_data()
+            update_stats()
+        
+        return {
+            "success": True,
+            "message": f"已创建 {created_orders}/{total_orders} 个订单",
+            "total_orders": total_orders,
+            "created_orders": created_orders
+        }
+        
+    except Exception as e:
+        add_log("ERROR", f"处理Telegram下单时出错: {str(e)}", "telegram")
+        import traceback
+        add_log("ERROR", f"错误详情: {traceback.format_exc()}", "telegram")
+        return {
+            "success": False,
+            "message": f"下单失败: {str(e)}",
+            "total_orders": 0,
+            "created_orders": 0
+        }
+
 @app.route('/api/telegram/webhook', methods=['POST'])
 def telegram_webhook():
     """
-    Telegram webhook端点，处理内联键盘按钮回调
+    Telegram webhook端点，处理内联键盘按钮回调和普通消息
     """
     try:
         data = request.json
@@ -3021,10 +3252,64 @@ def telegram_webhook():
                 add_log("WARNING", f"未知的action: {action}", "telegram")
                 return jsonify({"ok": False, "error": f"Unknown action: {action}"}), 400
         
-        # 处理普通消息（可选，暂时忽略）
+        # 处理普通消息（支持特定格式的下单消息）
         elif data.get("message"):
-            add_log("DEBUG", "收到Telegram普通消息，暂时忽略", "telegram")
-            return jsonify({"ok": True})
+            message = data["message"]
+            text = message.get("text", "").strip()
+            chat_id = message.get("chat", {}).get("id")
+            message_id = message.get("message_id")
+            from_user = message.get("from", {})
+            user_id = from_user.get("id")
+            username = from_user.get("username", "未知用户")
+            
+            add_log("INFO", f"收到Telegram普通消息: user_id={user_id}, username={username}, text={text[:100]}", "telegram")
+            
+            # 解析消息，检查是否是下单格式
+            order_info = parse_telegram_order_message(text)
+            
+            if order_info:
+                # 这是下单消息
+                plan_code = order_info["planCode"]
+                datacenter = order_info["datacenter"]
+                quantity = order_info["quantity"]
+                options = order_info["options"]
+                
+                add_log("INFO", f"解析下单消息: planCode={plan_code}, datacenter={datacenter}, quantity={quantity}, options={options}", "telegram")
+                
+                # 处理下单
+                result = process_telegram_order(plan_code, datacenter, quantity, options)
+                
+                # 发送回复消息
+                tg_token = config.get("tgToken")
+                if tg_token:
+                    if result["success"]:
+                        reply_text = (
+                            f"✅ 下单成功！\n\n"
+                            f"型号: {plan_code}\n"
+                            f"机房: {datacenter.upper() if datacenter else '所有可用机房'}\n"
+                            f"数量: {quantity}\n"
+                            f"配置: {', '.join(options) if options else '所有可用配置'}\n\n"
+                            f"已创建: {result['created_orders']}/{result['total_orders']} 个订单\n"
+                            f"系统将自动尝试下单。"
+                        )
+                    else:
+                        reply_text = f"❌ 下单失败\n\n{result['message']}"
+                    
+                    send_url = f"https://api.telegram.org/bot{tg_token}/sendMessage"
+                    try:
+                        requests.post(send_url, json={
+                            "chat_id": chat_id,
+                            "text": reply_text,
+                            "reply_to_message_id": message_id
+                        }, timeout=10)
+                    except Exception as e:
+                        add_log("ERROR", f"发送Telegram回复消息失败: {str(e)}", "telegram")
+                
+                return jsonify({"ok": True})
+            else:
+                # 不是下单格式的消息，忽略
+                add_log("DEBUG", "消息不是下单格式，忽略", "telegram")
+                return jsonify({"ok": True})
         
         return jsonify({"ok": True})
         

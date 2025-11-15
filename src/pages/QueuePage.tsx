@@ -554,6 +554,66 @@ const QueuePage = () => {
         </div>
       )}
 
+      {/* Telegram WEBHOOK 下单说明 */}
+      <div className="bg-cyber-surface-dark p-4 sm:p-6 rounded-lg shadow-xl border border-cyber-border">
+        <h3 className={`${isMobile ? 'text-base' : 'text-lg'} font-semibold mb-3 text-cyber-primary-accent flex items-center gap-2`}>
+          📱 Telegram WEBHOOK 下单说明
+        </h3>
+        <p className="text-sm text-cyber-muted mb-3">
+          您可以通过 Telegram 发送特定格式的消息来快速下单。系统会自动解析消息并创建订单。
+        </p>
+        
+        <div className="space-y-3">
+          <div>
+            <p className="text-xs font-medium text-cyber-secondary mb-2">📝 消息格式：</p>
+            <code className="block text-xs bg-cyber-dark p-2 rounded border border-cyber-border text-cyber-accent mb-1">
+              plancode [datacenter] [quantity] [options]
+            </code>
+            <p className="text-xs text-cyber-muted">
+              下单规则：可用配置 × 可用机房 × 指定数量 = 总订单数
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs font-medium text-cyber-secondary mb-2">💡 支持的模式：</p>
+            <div className="space-y-2 text-xs">
+              <div className="bg-cyber-grid/10 p-2 rounded border border-cyber-accent/20">
+                <p className="text-cyber-accent font-mono mb-1">1. 24sk202</p>
+                <p className="text-cyber-muted">只有型号，使用所有可用配置和所有可用机房，数量默认为1</p>
+              </div>
+              <div className="bg-cyber-grid/10 p-2 rounded border border-cyber-accent/20">
+                <p className="text-cyber-accent font-mono mb-1">2. 24sk202 rbx 1</p>
+                <p className="text-cyber-muted">型号 + 机房 + 数量（指定机房和数量）</p>
+              </div>
+              <div className="bg-cyber-grid/10 p-2 rounded border border-cyber-accent/20">
+                <p className="text-cyber-accent font-mono mb-1">3. 24sk202 1</p>
+                <p className="text-cyber-muted">型号 + 数量（不指定机房，使用所有可用机房）</p>
+              </div>
+              <div className="bg-cyber-grid/10 p-2 rounded border border-cyber-accent/20">
+                <p className="text-cyber-accent font-mono mb-1">4. 24sk202 rbx 1 ram-64g-ecc-2133-24sk20,softraid-2x450nvme-24sk20</p>
+                <p className="text-cyber-muted">完整格式：型号 + 机房 + 数量 + 可选配置（用逗号分隔）</p>
+              </div>
+              <div className="bg-cyber-grid/10 p-2 rounded border border-cyber-accent/20">
+                <p className="text-cyber-accent font-mono mb-1">5. 24sk202 1 ram-64g-ecc-2133-24sk20,softraid-2x450nvme-24sk20</p>
+                <p className="text-cyber-muted">型号 + 数量 + 可选配置（不指定机房）</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 p-2 bg-yellow-500/10 border border-yellow-500/30 rounded">
+            <p className="text-xs text-yellow-400">
+              ⚠️ <strong>注意事项：</strong>
+            </p>
+            <ul className="text-xs text-yellow-300/80 mt-1 space-y-1 list-disc list-inside">
+              <li>系统会自动过滤无货的配置和机房</li>
+              <li>如果指定了配置选项，只会匹配包含这些选项的配置</li>
+              <li>如果指定了机房，只会在该机房创建订单</li>
+              <li>未指定的参数将使用默认值（所有可用配置/所有可用机房/数量1）</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       {/* Queue List */}
       <div>
         <div className="space-y-3">

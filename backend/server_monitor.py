@@ -42,7 +42,24 @@ class ServerMonitor:
         self.message_uuid_cache = {}
         self.message_uuid_cache_ttl = 24 * 3600  # 缓存有效期：24小时（秒）
         
+        # ✅ 添加线程锁保护缓存操作的并发安全
+        self._cache_lock = threading.Lock()
+        
         self.add_log("INFO", "服务器监控器初始化完成", "monitor")
+    
+    def _limit_history_size(self, subscription, max_size=100):
+        """
+        限制订阅历史记录数量，保留最近N条
+        
+        Args:
+            subscription: 订阅对象
+            max_size: 最大历史记录数量，默认100
+        """
+        if "history" not in subscription:
+            subscription["history"] = []
+        
+        if len(subscription["history"]) > max_size:
+            subscription["history"] = subscription["history"][-max_size:]
     
     def _now_beijing(self) -> datetime:
         """返回北京时间（Asia/Shanghai）的当前时间。"""
@@ -258,24 +275,45 @@ class ServerMonitor:
                                         price_queue.put(None)
                                 
                                 # 启动价格获取线程
-                                price_thread = threading.Thread(target=fetch_price, daemon=True)
+                                price_thread = threading.Thread(
+                                    target=fetch_price, 
+                                    daemon=True,
+                                    name=f"PriceFetch-{plan_code}-{first_available_dc}"
+                                )
                                 price_thread.start()
+                                start_time = time.time()
                                 price_thread.join(timeout=30.0)  # 最多等待30秒
+                                elapsed_time = time.time() - start_time
                                 
                                 if price_thread.is_alive():
-                                    self.add_log("WARNING", f"价格获取超时（30秒），发送不带价格的通知", "monitor")
+                                    # ✅ 线程超时，记录详细信息（daemon线程会在主程序退出时自动结束）
+                                    self.add_log("WARNING", 
+                                        f"价格获取超时（已等待{elapsed_time:.1f}秒，线程ID: {price_thread.ident}），"
+                                        f"发送不带价格的通知。daemon线程将在后台继续运行直到完成。", 
+                                        "monitor")
+                                    price_text = None
                                 else:
+                                    # 线程已完成，尝试获取结果
                                     try:
                                         price_text = price_queue.get_nowait()
                                     except queue.Empty:
-                                        pass
+                                        price_text = None
+                                        self.add_log("WARNING", 
+                                            f"价格获取线程已完成但队列为空（耗时{elapsed_time:.1f}秒）", 
+                                            "monitor")
                                 
                                 if price_text:
-                                    self.add_log("DEBUG", f"配置 {config_display} 价格获取成功: {price_text}，将在所有通知中复用", "monitor")
+                                    self.add_log("DEBUG", 
+                                        f"配置 {config_display} 价格获取成功（耗时{elapsed_time:.1f}秒）: {price_text}，将在所有通知中复用", 
+                                        "monitor")
                                 else:
-                                    self.add_log("WARNING", f"配置 {config_display} 价格获取失败，通知中不包含价格信息", "monitor")
+                                    self.add_log("WARNING", 
+                                        f"配置 {config_display} 价格获取失败（耗时{elapsed_time:.1f}秒），通知中不包含价格信息", 
+                                        "monitor")
                             except Exception as e:
+                                # ✅ 统一错误处理：记录详细异常信息
                                 self.add_log("WARNING", f"价格获取过程异常: {str(e)}", "monitor")
+                                self.add_log("DEBUG", f"价格获取异常详情: {traceback.format_exc()}", "monitor")
                     
                     # 按change_type分组发送通知（汇总同一配置的所有有货机房）
                     available_notifications = [n for n in notifications_to_send if n["change_type"] == "available"]
@@ -307,7 +345,9 @@ class ServerMonitor:
                                 except requests.exceptions.RequestException as e:
                                     self.add_log("WARNING", f"[monitor->order] 快速下单请求异常: {str(e)}", "monitor")
                         except Exception as e:
+                            # ✅ 统一错误处理：记录详细异常信息
                             self.add_log("WARNING", f"[monitor->order] 下单前置流程异常: {str(e)}", "monitor")
+                            self.add_log("DEBUG", f"[monitor->order] 下单异常详情: {traceback.format_exc()}", "monitor")
                     
                     # 发送有货通知（汇总所有有货的机房到一个通知，带按钮）
                     if available_notifications:
@@ -444,9 +484,8 @@ class ServerMonitor:
                         
                         subscription["history"].append(history_entry)
                     
-                    # 限制历史记录数量
-                    if len(subscription["history"]) > 100:
-                        subscription["history"] = subscription["history"][-100:]
+                    # ✅ 使用统一方法限制历史记录数量（在循环外统一限制，避免重复检查）
+                    self._limit_history_size(subscription)
             
             # 更新状态（需要转换为状态字典）
             new_last_status = {}
@@ -574,9 +613,13 @@ class ServerMonitor:
                                 duration_text = f"历时 {minutes}分{seconds}秒"
                             else:
                                 duration_text = f"历时 {seconds}秒"
-                        except Exception:
+                        except Exception as e:
+                            # ✅ 统一错误处理：记录异常但不中断流程
+                            self.add_log("DEBUG", f"计算历时异常: {str(e)}", "monitor")
                             duration_text = None
-                except Exception:
+                except Exception as e:
+                    # ✅ 统一错误处理：记录异常但不中断流程
+                    self.add_log("DEBUG", f"查找有货记录异常: {str(e)}", "monitor")
                     duration_text = None
 
             self.send_availability_alert(plan_code, dc, status, change_type, config_info, server_name, duration_text=duration_text)
@@ -599,9 +642,8 @@ class ServerMonitor:
             
             subscription["history"].append(history_entry)
             
-            # 限制历史记录数量，保留最近100条
-            if len(subscription["history"]) > 100:
-                subscription["history"] = subscription["history"][-100:]
+            # ✅ 使用统一方法限制历史记录数量，保留最近100条
+            self._limit_history_size(subscription)
     
     def send_availability_alert_grouped(self, plan_code, available_dcs, config_info=None, server_name=None):
         """
@@ -698,13 +740,15 @@ class ServerMonitor:
                 
                 # 为每个按钮生成UUID并存储完整配置信息（UUID机制）
                 message_uuid = str(uuid.uuid4())
-                self.message_uuid_cache[message_uuid] = {
-                    "planCode": plan_code,
-                    "datacenter": dc,
-                    "options": options,
-                    "configInfo": config_info,  # 保存完整的config_info以便将来扩展
-                    "timestamp": time.time()
-                }
+                # ✅ 使用锁保护缓存写入操作
+                with self._cache_lock:
+                    self.message_uuid_cache[message_uuid] = {
+                        "planCode": plan_code,
+                        "datacenter": dc,
+                        "options": options,
+                        "configInfo": config_info,  # 保存完整的config_info以便将来扩展
+                        "timestamp": time.time()
+                    }
                 self.add_log("DEBUG", f"生成消息UUID: {message_uuid}, 配置: {plan_code}@{dc}, options={options}", "monitor")
                 
                 # callback_data 只包含UUID（使用短格式：u=uuid）
@@ -818,24 +862,38 @@ class ServerMonitor:
                                 price_queue.put(None)
                         
                         # 启动价格获取线程
-                        price_thread = threading.Thread(target=fetch_price, daemon=True)
+                        price_thread = threading.Thread(
+                            target=fetch_price, 
+                            daemon=True,
+                            name=f"PriceFetch-{plan_code}-{datacenter}"
+                        )
                         price_thread.start()
+                        start_time = time.time()
                         price_thread.join(timeout=30.0)  # 最多等待30秒
+                        elapsed_time = time.time() - start_time
                         
                         if price_thread.is_alive():
-                            # 如果线程还在运行，说明超时了
-                            self.add_log("WARNING", f"价格获取超时（30秒），发送不带价格的通知", "monitor")
+                            # ✅ 线程超时，记录详细信息（daemon线程会在主程序退出时自动结束）
+                            self.add_log("WARNING", 
+                                f"价格获取超时（已等待{elapsed_time:.1f}秒，线程ID: {price_thread.ident}），"
+                                f"发送不带价格的通知。daemon线程将在后台继续运行直到完成。", 
+                                "monitor")
                             price_text = None
                         else:
-                            # 尝试获取结果（如果线程完成）
+                            # 线程已完成，尝试获取结果
                             try:
                                 price_text = price_queue.get_nowait()
                             except queue.Empty:
                                 price_text = None
+                                self.add_log("WARNING", 
+                                    f"价格获取线程已完成但队列为空（耗时{elapsed_time:.1f}秒）", 
+                                    "monitor")
                         
                         if not price_text:
                             # 如果价格获取失败，记录警告但继续发送通知
-                            self.add_log("WARNING", f"价格获取失败或超时，通知中不包含价格信息", "monitor")
+                            self.add_log("WARNING", 
+                                f"价格获取失败或超时（耗时{elapsed_time:.1f}秒），通知中不包含价格信息", 
+                                "monitor")
                     except Exception as e:
                         self.add_log("WARNING", f"价格获取过程异常: {str(e)}，发送不带价格的通知", "monitor")
                         import traceback
@@ -1014,28 +1072,30 @@ class ServerMonitor:
             self.add_log("ERROR", f"发送新服务器提醒失败: {str(e)}", "monitor")
     
     def _cleanup_expired_caches(self):
-        """清理过期的缓存项（UUID和options缓存）"""
+        """清理过期的缓存项（UUID和options缓存）- 线程安全"""
         current_time = time.time()
         expired_uuids = []
         expired_options_keys = []
         
-        # 清理过期的UUID缓存
-        for uuid_key, cache_data in self.message_uuid_cache.items():
-            cache_timestamp = cache_data.get("timestamp", 0)
-            if current_time - cache_timestamp >= self.message_uuid_cache_ttl:
-                expired_uuids.append(uuid_key)
-        
-        for uuid_key in expired_uuids:
-            del self.message_uuid_cache[uuid_key]
-        
-        # 清理过期的options缓存
-        for options_key, cache_data in self.options_cache.items():
-            cache_timestamp = cache_data.get("timestamp", 0)
-            if current_time - cache_timestamp >= self.options_cache_ttl:
-                expired_options_keys.append(options_key)
-        
-        for options_key in expired_options_keys:
-            del self.options_cache[options_key]
+        # ✅ 使用锁保护缓存操作
+        with self._cache_lock:
+            # 清理过期的UUID缓存
+            for uuid_key, cache_data in list(self.message_uuid_cache.items()):
+                cache_timestamp = cache_data.get("timestamp", 0)
+                if current_time - cache_timestamp >= self.message_uuid_cache_ttl:
+                    expired_uuids.append(uuid_key)
+            
+            for uuid_key in expired_uuids:
+                del self.message_uuid_cache[uuid_key]
+            
+            # 清理过期的options缓存
+            for options_key, cache_data in list(self.options_cache.items()):
+                cache_timestamp = cache_data.get("timestamp", 0)
+                if current_time - cache_timestamp >= self.options_cache_ttl:
+                    expired_options_keys.append(options_key)
+            
+            for options_key in expired_options_keys:
+                del self.options_cache[options_key]
         
         if expired_uuids or expired_options_keys:
             self.add_log("DEBUG", f"清理过期缓存: UUID={len(expired_uuids)}个, Options={len(expired_options_keys)}个", "monitor")
@@ -1070,6 +1130,7 @@ class ServerMonitor:
                 # 注意：新服务器检查需要在外部调用时传入服务器列表
                 
             except Exception as e:
+                # ✅ 统一错误处理：记录详细异常信息
                 self.add_log("ERROR", f"监控循环出错: {str(e)}", "monitor")
                 self.add_log("ERROR", f"错误详情: {traceback.format_exc()}", "monitor")
             

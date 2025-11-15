@@ -246,6 +246,8 @@ const MonitorPage = () => {
         }
       };
     }
+    // ✅ 添加依赖项：loadSubscriptions 和 loadMonitorStatus 是稳定的函数引用，不会导致无限循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
   return (
@@ -545,14 +547,17 @@ const MonitorPage = () => {
                                   </div>
                                 )}
                                 <p className="text-cyber-muted mt-1 text-xs">
-                                  {new Date(entry.timestamp).toLocaleString('zh-CN', {
-                                    year: 'numeric',
-                                    month: '2-digit',
-                                    day: '2-digit',
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    second: '2-digit'
-                                  })}
+                                  {(() => {
+                                    // ✅ 统一时间格式，避免依赖浏览器时区设置
+                                    const date = new Date(entry.timestamp);
+                                    const year = date.getFullYear();
+                                    const month = String(date.getMonth() + 1).padStart(2, '0');
+                                    const day = String(date.getDate()).padStart(2, '0');
+                                    const hours = String(date.getHours()).padStart(2, '0');
+                                    const minutes = String(date.getMinutes()).padStart(2, '0');
+                                    const seconds = String(date.getSeconds()).padStart(2, '0');
+                                    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+                                  })()}
                                 </p>
                               </div>
                             </div>

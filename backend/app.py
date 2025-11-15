@@ -2832,69 +2832,89 @@ def telegram_webhook():
                 message_uuid = callback_data_obj.get("u") or callback_data_obj.get("uuid")
                 
                 if message_uuid and monitor and hasattr(monitor, 'message_uuid_cache'):
-                    # UUID机制：从缓存恢复完整配置
-                    if message_uuid in monitor.message_uuid_cache:
-                        cached_config = monitor.message_uuid_cache[message_uuid]
-                        cache_timestamp = cached_config.get("timestamp", 0)
-                        current_time = time.time()
-                        
-                        # 检查缓存是否过期
-                        if current_time - cache_timestamp < monitor.message_uuid_cache_ttl:
-                            plan_code = cached_config.get("planCode")
-                            datacenter = cached_config.get("datacenter")
-                            options = cached_config.get("options", [])
-                            
-                            add_log("INFO", f"✅ 从UUID缓存恢复配置: UUID={message_uuid}, {plan_code}@{datacenter}, options={options}", "telegram")
-                            
-                            # 添加到抢购队列
-                            queue_item = {
-                                "id": str(uuid.uuid4()),
-                                "planCode": plan_code,
-                                "datacenter": datacenter,
-                                "options": options,
-                                "status": "running",
-                                "createdAt": datetime.now().isoformat(),
-                                "updatedAt": datetime.now().isoformat(),
-                                "retryInterval": 30,
-                                "retryCount": 0,
-                                "lastCheckTime": 0,
-                                "fromTelegram": True  # 标记来自Telegram
-                            }
-                            
-                            queue.append(queue_item)
-                            save_data()
-                            update_stats()
-                            
-                            options_str = ", ".join(options) if options else "无（默认配置）"
-                            add_log("INFO", f"Telegram用户 {user_id} 通过UUID按钮添加到队列: {plan_code}@{datacenter}, 配置选项: {options_str}", "telegram")
-                            
-                            # 回复确认消息
-                            tg_token = config.get("tgToken")
-                            if tg_token:
-                                confirm_message = f"✅ 已添加到抢购队列！\n\n型号: {plan_code}\n机房: {datacenter.upper()}\n配置: {options_str}\n\n系统将自动尝试下单。"
-                                answer_url = f"https://api.telegram.org/bot{tg_token}/answerCallbackQuery"
-                                send_url = f"https://api.telegram.org/bot{tg_token}/sendMessage"
+                    # UUID机制：从缓存恢复完整配置 - 使用锁保护并发访问
+                    cached_config = None
+                    cache_valid = False
+                    
+                    # ✅ 使用锁保护缓存读取和删除操作
+                    if hasattr(monitor, '_cache_lock'):
+                        with monitor._cache_lock:
+                            if message_uuid in monitor.message_uuid_cache:
+                                cached_config = monitor.message_uuid_cache[message_uuid]
+                                cache_timestamp = cached_config.get("timestamp", 0)
+                                current_time = time.time()
                                 
-                                # 先回答callback（显示loading提示）
-                                requests.post(answer_url, json={
-                                    "callback_query_id": callback_query.get("id"),
-                                    "text": "已添加到队列！",
-                                    "show_alert": False
-                                }, timeout=5)
-                                
-                                # 发送确认消息
-                                requests.post(send_url, json={
-                                    "chat_id": chat_id,
-                                    "text": confirm_message,
-                                    "reply_to_message_id": message_id
-                                }, timeout=5)
-                            
-                            return jsonify({"ok": True})
-                        else:
-                            # 缓存过期，删除
-                            del monitor.message_uuid_cache[message_uuid]
-                            add_log("WARNING", f"UUID缓存已过期: {message_uuid}", "telegram")
+                                # 检查缓存是否过期
+                                if current_time - cache_timestamp < monitor.message_uuid_cache_ttl:
+                                    cache_valid = True
+                                else:
+                                    # 缓存过期，删除
+                                    del monitor.message_uuid_cache[message_uuid]
+                                    add_log("WARNING", f"UUID缓存已过期: {message_uuid}", "telegram")
                     else:
+                        # 兼容旧版本（无锁）
+                        if message_uuid in monitor.message_uuid_cache:
+                            cached_config = monitor.message_uuid_cache[message_uuid]
+                            cache_timestamp = cached_config.get("timestamp", 0)
+                            current_time = time.time()
+                            if current_time - cache_timestamp < monitor.message_uuid_cache_ttl:
+                                cache_valid = True
+                            else:
+                                del monitor.message_uuid_cache[message_uuid]
+                                add_log("WARNING", f"UUID缓存已过期: {message_uuid}", "telegram")
+                    
+                    if cache_valid and cached_config:
+                        plan_code = cached_config.get("planCode")
+                        datacenter = cached_config.get("datacenter")
+                        options = cached_config.get("options", [])
+                        
+                        add_log("INFO", f"✅ 从UUID缓存恢复配置: UUID={message_uuid}, {plan_code}@{datacenter}, options={options}", "telegram")
+                        
+                        # 添加到抢购队列
+                        queue_item = {
+                            "id": str(uuid.uuid4()),
+                            "planCode": plan_code,
+                            "datacenter": datacenter,
+                            "options": options,
+                            "status": "running",
+                            "createdAt": datetime.now().isoformat(),
+                            "updatedAt": datetime.now().isoformat(),
+                            "retryInterval": 30,
+                            "retryCount": 0,
+                            "lastCheckTime": 0,
+                            "fromTelegram": True  # 标记来自Telegram
+                        }
+                        
+                        queue.append(queue_item)
+                        save_data()
+                        update_stats()
+                        
+                        options_str = ", ".join(options) if options else "无（默认配置）"
+                        add_log("INFO", f"Telegram用户 {user_id} 通过UUID按钮添加到队列: {plan_code}@{datacenter}, 配置选项: {options_str}", "telegram")
+                        
+                        # 回复确认消息
+                        tg_token = config.get("tgToken")
+                        if tg_token:
+                            confirm_message = f"✅ 已添加到抢购队列！\n\n型号: {plan_code}\n机房: {datacenter.upper()}\n配置: {options_str}\n\n系统将自动尝试下单。"
+                            answer_url = f"https://api.telegram.org/bot{tg_token}/answerCallbackQuery"
+                            send_url = f"https://api.telegram.org/bot{tg_token}/sendMessage"
+                            
+                            # 先回答callback（显示loading提示）
+                            requests.post(answer_url, json={
+                                "callback_query_id": callback_query.get("id"),
+                                "text": "已添加到队列！",
+                                "show_alert": False
+                            }, timeout=5)
+                            
+                            # 发送确认消息
+                            requests.post(send_url, json={
+                                "chat_id": chat_id,
+                                "text": confirm_message,
+                                "reply_to_message_id": message_id
+                            }, timeout=5)
+                        
+                        return jsonify({"ok": True})
+                    elif cached_config is None:
                         add_log("WARNING", f"UUID未找到 in cache: {message_uuid}", "telegram")
                 
                 # 降级到旧机制（兼容性）：直接从callback_data提取
@@ -2913,18 +2933,38 @@ def telegram_webhook():
                 # 如果 callback_data 中没有 options 或 options 为空，尝试从监控器的缓存中恢复
                 if not options and plan_code and datacenter and monitor:
                     cache_key = f"{plan_code}|{datacenter}"
-                    if hasattr(monitor, 'options_cache') and cache_key in monitor.options_cache:
-                        cached_data = monitor.options_cache[cache_key]
-                        # 检查缓存是否过期（24小时）
-                        cache_timestamp = cached_data.get("timestamp", 0)
-                        current_time = time.time()
-                        if current_time - cache_timestamp < 24 * 3600:  # 24小时有效期
+                    # ✅ 使用锁保护options缓存访问
+                    if hasattr(monitor, 'options_cache'):
+                        cached_data = None
+                        cache_valid = False
+                        
+                        if hasattr(monitor, '_cache_lock'):
+                            with monitor._cache_lock:
+                                if cache_key in monitor.options_cache:
+                                    cached_data = monitor.options_cache[cache_key]
+                                    cache_timestamp = cached_data.get("timestamp", 0)
+                                    current_time = time.time()
+                                    if current_time - cache_timestamp < 24 * 3600:  # 24小时有效期
+                                        cache_valid = True
+                                    else:
+                                        # 缓存过期，删除
+                                        del monitor.options_cache[cache_key]
+                                        add_log("WARNING", f"options缓存已过期: {cache_key}", "telegram")
+                        else:
+                            # 兼容旧版本（无锁）
+                            if cache_key in monitor.options_cache:
+                                cached_data = monitor.options_cache[cache_key]
+                                cache_timestamp = cached_data.get("timestamp", 0)
+                                current_time = time.time()
+                                if current_time - cache_timestamp < 24 * 3600:
+                                    cache_valid = True
+                                else:
+                                    del monitor.options_cache[cache_key]
+                                    add_log("WARNING", f"options缓存已过期: {cache_key}", "telegram")
+                        
+                        if cache_valid and cached_data:
                             options = cached_data.get("options", [])
                             add_log("INFO", f"✅ 从缓存恢复 options: {cache_key} = {options}", "telegram")
-                        else:
-                            # 缓存过期，删除
-                            del monitor.options_cache[cache_key]
-                            add_log("WARNING", f"options缓存已过期: {cache_key}", "telegram")
                 
                 if not plan_code or not datacenter:
                     return jsonify({"ok": False, "error": "Missing planCode or datacenter"}), 400
@@ -4406,11 +4446,24 @@ def quick_order():
             add_log("WARNING", f"快速下单前价格校验失败: {plancode}@{datacenter} - {err}", "config_sniper")
             return jsonify({"success": False, "error": f"价格校验失败：{err}"}), 400
 
-        price_payload = price_result.get("price") or {}
-        price_values = (price_payload.get("prices") or {})
+        # ✅ 显式校验price字段存在且格式正确（即使success=True）
+        if "price" not in price_result:
+            add_log("WARNING", f"快速下单前价格校验失败: {plancode}@{datacenter} - price字段缺失", "config_sniper")
+            return jsonify({"success": False, "error": "价格查询返回数据格式异常：缺少price字段"}), 400
+        
+        price_payload = price_result.get("price")
+        if not isinstance(price_payload, dict):
+            add_log("WARNING", f"快速下单前价格校验失败: {plancode}@{datacenter} - price字段类型错误: {type(price_payload)}", "config_sniper")
+            return jsonify({"success": False, "error": "价格查询返回数据格式异常：price字段类型错误"}), 400
+        
+        price_values = price_payload.get("prices")
+        if not isinstance(price_values, dict):
+            add_log("WARNING", f"快速下单前价格校验失败: {plancode}@{datacenter} - prices字段缺失或类型错误", "config_sniper")
+            return jsonify({"success": False, "error": "价格查询返回数据格式异常：prices字段缺失或类型错误"}), 400
+        
         with_tax = price_values.get("withTax")
         if with_tax in [None, 0, 0.0]:
-            add_log("WARNING", f"快速下单前价格缺失或无效: {plancode}@{datacenter}", "config_sniper")
+            add_log("WARNING", f"快速下单前价格缺失或无效: {plancode}@{datacenter} - withTax={with_tax}", "config_sniper")
             return jsonify({"success": False, "error": "该组合暂无有效价格，暂不支持下单"}), 400
 
         # 防重复（仅限 quick-order）：若同一 planCode+datacenter+options（配置指纹）

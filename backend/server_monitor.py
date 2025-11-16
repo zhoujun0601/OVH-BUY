@@ -223,11 +223,11 @@ class ServerMonitor:
                             # 可用性显示有货，但需要价格校验确认
                             price_available = self._verify_price_available(plan_code, dc, config_info)
                             if not price_available:
-                                # 价格校验失败，实际不可下单，视为无货，但需要触发通知
-                                actual_status = "unavailable"
+                                # 价格校验失败，使用特殊状态值标记，避免与真正的无货混淆
+                                actual_status = "price_check_failed"  # 使用特殊状态值
                                 price_check_failed = True  # 标记价格校验失败
                                 config_desc = f" [{config_display}]" if config_display else ""
-                                self.add_log("INFO", f"{plan_code}@{dc}{config_desc} 可用性显示有货但价格校验失败，视为无货（将触发通知但不自动下单）", "monitor")
+                                self.add_log("INFO", f"{plan_code}@{dc}{config_desc} 可用性显示有货但价格校验失败，标记为price_check_failed（将触发通知但不自动下单）", "monitor")
                             else:
                                 # 价格校验通过，真正有货
                                 actual_status = "available"
@@ -241,49 +241,66 @@ class ServerMonitor:
                         # 首次检查时也发送通知（如果配置允许）
                         if old_status is None:
                             config_desc = f" [{config_display}]" if config_display else ""
-                            if actual_status == "unavailable":
-                                # 如果是价格校验失败的情况，需要触发通知
-                                if price_check_failed:
-                                    # 价格校验失败，触发通知（说明可用性有货但价格校验失败）
-                                    self.add_log("INFO", f"首次检查: {plan_code}@{dc}{config_desc} 可用性有货但价格校验失败，发送通知", "monitor")
-                                    if subscription.get("notifyAvailable", True):
-                                        status_changed = True
-                                        change_type = "price_check_failed"  # 特殊类型：价格校验失败
-                                else:
-                                    # 普通无货情况
-                                    self.add_log("INFO", f"首次检查: {plan_code}@{dc}{config_desc} 无货", "monitor")
-                                    # 首次检查无货时不通知（除非用户明确要求）
-                                    if subscription.get("notifyUnavailable", False):
-                                        status_changed = True
-                                        change_type = "unavailable"
+                            if actual_status == "price_check_failed":
+                                # 价格校验失败，触发通知（说明可用性有货但价格校验失败）
+                                self.add_log("INFO", f"首次检查: {plan_code}@{dc}{config_desc} 可用性有货但价格校验失败，发送通知", "monitor")
+                                if subscription.get("notifyAvailable", True):
+                                    status_changed = True
+                                    change_type = "price_check_failed"  # 特殊类型：价格校验失败
+                            elif actual_status == "unavailable":
+                                # 普通无货情况
+                                self.add_log("INFO", f"首次检查: {plan_code}@{dc}{config_desc} 无货", "monitor")
+                                # 首次检查无货时不通知（除非用户明确要求）
+                                if subscription.get("notifyUnavailable", False):
+                                    status_changed = True
+                                    change_type = "unavailable"
                             else:
                                 # 首次检查有货时发送通知
                                 self.add_log("INFO", f"首次检查: {plan_code}@{dc}{config_desc} 有货（价格校验通过），发送通知", "monitor")
                                 if subscription.get("notifyAvailable", True):
                                     status_changed = True
                                     change_type = "available"
-                        # 从无货变有货（包括从无货变价格校验失败的情况）
-                        elif old_status == "unavailable":
-                            if actual_status != "unavailable":
-                                # 从无货变有货（价格校验通过）
-                                if subscription.get("notifyAvailable", True):
-                                    status_changed = True
-                                    change_type = "available"
-                                    config_desc = f" [{config_display}]" if config_display else ""
-                                    self.add_log("INFO", f"{plan_code}@{dc}{config_desc} 从无货变有货（价格校验通过）", "monitor")
-                            elif price_check_failed:
-                                # 从无货变价格校验失败（可用性有货但价格校验失败）
-                                self.add_log("INFO", f"{plan_code}@{dc}{config_desc} 从无货变可用性有货但价格校验失败，发送通知", "monitor")
-                                if subscription.get("notifyAvailable", True):
-                                    status_changed = True
-                                    change_type = "price_check_failed"  # 特殊类型：价格校验失败
-                        # 从有货变无货
-                        elif old_status not in ["unavailable", None] and actual_status == "unavailable":
+                        # 从无货变有货（价格校验通过）
+                        elif old_status == "unavailable" and actual_status == "available":
+                            if subscription.get("notifyAvailable", True):
+                                status_changed = True
+                                change_type = "available"
+                                config_desc = f" [{config_display}]" if config_display else ""
+                                self.add_log("INFO", f"{plan_code}@{dc}{config_desc} 从无货变有货（价格校验通过）", "monitor")
+                        # 从无货变价格校验失败（可用性有货但价格校验失败）
+                        elif old_status == "unavailable" and actual_status == "price_check_failed":
+                            self.add_log("INFO", f"{plan_code}@{dc}{config_desc} 从无货变可用性有货但价格校验失败，发送通知", "monitor")
+                            if subscription.get("notifyAvailable", True):
+                                status_changed = True
+                                change_type = "price_check_failed"  # 特殊类型：价格校验失败
+                        # 从价格校验失败变有货（价格校验通过）
+                        elif old_status == "price_check_failed" and actual_status == "available":
+                            if subscription.get("notifyAvailable", True):
+                                status_changed = True
+                                change_type = "available"
+                                config_desc = f" [{config_display}]" if config_display else ""
+                                self.add_log("INFO", f"{plan_code}@{dc}{config_desc} 从价格校验失败变有货（价格校验通过）", "monitor")
+                        # 从价格校验失败变无货（真正的无货）
+                        elif old_status == "price_check_failed" and actual_status == "unavailable":
                             if subscription.get("notifyUnavailable", False):
                                 status_changed = True
                                 change_type = "unavailable"
                                 config_desc = f" [{config_display}]" if config_display else ""
-                                self.add_log("INFO", f"{plan_code}@{dc}{config_desc} 从有货变无货", "monitor")
+                                self.add_log("INFO", f"{plan_code}@{dc}{config_desc} 从价格校验失败变无货", "monitor")
+                        # 从有货变无货或价格校验失败
+                        elif old_status == "available" and actual_status in ["unavailable", "price_check_failed"]:
+                            if actual_status == "unavailable":
+                                if subscription.get("notifyUnavailable", False):
+                                    status_changed = True
+                                    change_type = "unavailable"
+                                    config_desc = f" [{config_display}]" if config_display else ""
+                                    self.add_log("INFO", f"{plan_code}@{dc}{config_desc} 从有货变无货", "monitor")
+                            else:  # price_check_failed
+                                # 从有货变价格校验失败（可用性有货但价格校验失败）
+                                self.add_log("INFO", f"{plan_code}@{dc}{config_desc} 从有货变可用性有货但价格校验失败，发送通知", "monitor")
+                                if subscription.get("notifyAvailable", True):
+                                    status_changed = True
+                                    change_type = "price_check_failed"
                         
                         if status_changed:
                             notifications_to_send.append({
@@ -295,7 +312,7 @@ class ServerMonitor:
                                 "price_check_failed": price_check_failed  # 标记价格校验失败
                             })
                         
-                        # 更新状态记录（使用实际状态）
+                        # 更新状态记录（使用实际状态，包括特殊状态值 "price_check_failed"）
                         last_status[status_key] = actual_status
                     
                     # 对于同一个配置，只查询一次价格（使用第一个有货的数据中心）
@@ -490,7 +507,7 @@ class ServerMonitor:
                         history_entry = {
                             "timestamp": self._now_beijing().isoformat(),
                             "datacenter": notif["dc"],
-                            "status": "unavailable",
+                            "status": "price_check_failed",  # 使用特殊状态值
                             "changeType": "price_check_failed",
                             "oldStatus": notif["old_status"]
                         }

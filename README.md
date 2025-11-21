@@ -115,7 +115,11 @@
 - OVH API 凭据（Application Key、Secret、Consumer Key）
 
 ### 安装步骤
+一行命令
+```
+git clone https://github.com/coolci/OVH-BUY.git && cd OVH-BUY && echo "API_SECRET_KEY=你的密钥" > backend/.env && docker compose up -d --build
 
+```
 1. **克隆项目**
 ```bash
 git clone https://github.com/coolci/OVH-BUY.git
@@ -131,7 +135,7 @@ API_SECRET_KEY=你的密钥
 
 3. **启动服务**
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
 
 4. **访问系统**
